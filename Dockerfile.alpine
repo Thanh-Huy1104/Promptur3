@@ -1,0 +1,46 @@
+# Dockerfile with minimal Alpine Linux for security
+FROM node:20-alpine3.19
+
+# Add security updates and required packages
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache \
+    curl \
+    dumb-init \
+    tzdata && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001 -G nodejs
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files with proper ownership
+COPY --chown=nestjs:nodejs package*.json ./
+
+# Install dependencies as root, then switch to non-root
+RUN npm ci --only=production && \
+    npm cache clean --force
+
+# Switch to non-root user
+USER nestjs
+
+# Copy application files
+COPY --chown=nestjs:nodejs . .
+
+# Build the application
+RUN npm run build
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["node", "dist/main"]

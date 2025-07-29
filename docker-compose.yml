@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: prompture-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - prompture-network
+
+  # Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: prompture-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - prompture-network
+
+  # NestJS Application (uncomment when you have a Dockerfile)
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: prompture-app
+  #   restart: unless-stopped
+  #   environment:
+  #     NODE_ENV: ${NODE_ENV}
+  #     DB_HOST: db
+  #     DB_PORT: 5432
+  #     DB_USERNAME: ${POSTGRES_USER}
+  #     DB_PASSWORD: ${POSTGRES_PASSWORD}
+  #     DB_DATABASE: ${POSTGRES_DB}
+  #     PORT: ${PORT}
+  #   ports:
+  #     - "${PORT}:${PORT}"
+  #   depends_on:
+  #     - db
+  #     - redis
+  #   networks:
+  #     - prompture-network
+
+  # pgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: prompture-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@prompture.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - prompture-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  prompture-network:
+    driver: bridge

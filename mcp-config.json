@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "weather": {
+      "command": "/Users/th/.local/bin/uv",
+      "args": [
+        "--directory",
+        "/Users/th/Documents/Github/quickstart-resources/weather-server-python",
+        "run",
+        "weather.py"
+      ]
+    },
+    "dbhub-postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@bytebase/dbhub",
+        "--transport",
+        "stdio",
+        "--dsn",
+        "postgresql://th@localhost:5432/employee"
+      ]
+    }
+  }
+}
