@@ -11,11 +11,31 @@ export class CreateMessageDto {
   role: string;
   content: string;
   chatId: string;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, any>;
+  }>;
+  toolResults?: Array<{
+    name: string;
+    arguments: Record<string, any>;
+    result: any;
+    error?: string;
+  }>;
 }
 
 export class UpdateMessageDto {
   role?: string;
   content?: string;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, any>;
+  }>;
+  toolResults?: Array<{
+    name: string;
+    arguments: Record<string, any>;
+    result: any;
+    error?: string;
+  }>;
 }
 
 // Streaming chat DTOs

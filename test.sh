@@ -9,8 +9,8 @@ echo "1. Creating user..."
 USER_RESPONSE=$(curl -s -X POST $BASE_URL/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Weather Test User 2",
-    "email": "weather-test-2@example.com",
+    "name": "Weather Test User 3",
+    "email": "weather-test-3@example.com",
     "language": "en",
     "timezone": "America/New_York"
   }')

@@ -9,7 +9,6 @@ import { MCPServerConnector } from '../mcp/mcp-server-connector.service';
 import { MCPService } from '../mcp/mcp.service';
 import { Chat } from './chat.entity';
 import {
-  ChatContext,
   CreateChatDto,
   CreateMessageDto,
   StreamChatChunk,
@@ -110,7 +109,6 @@ export class ChatService {
   ): AsyncGenerator<StreamChatChunk> {
     // Implementation for streaming query results
     const { userId, chatId, message, model } = streamChatDto;
-    let response = '';
     const messages: Message[] = [];
 
     let chat = await this.findOneChat(chatId);
@@ -173,12 +171,21 @@ export class ChatService {
       const stream = await this.llmService.chat(chatParams);
       const toolCalls: ToolCall[] = [];
       let step_response = '';
+      const currentToolCalls: Array<{
+        name: string;
+        arguments: Record<string, any>;
+      }> = [];
+      const currentToolResults: Array<{
+        name: string;
+        arguments: Record<string, any>;
+        result: any;
+        error?: string;
+      }> = [];
 
       for await (const chunk of stream) {
         const message = chunk.message || {};
         if (message.content) {
           step_response += message.content;
-          response += message.content;
           yield {
             type: 'message',
             content: step_response,
@@ -191,12 +198,31 @@ export class ChatService {
       }
 
       if (!toolCalls || toolCalls.length === 0) {
+        // No tool calls - save assistant message and break
+        const assistantMessage = this.messageRepository.create({
+          role: 'assistant',
+          content: step_response,
+          chatId: chat.id,
+        });
+        messages.push(assistantMessage);
+
+        await this.createMessage({
+          role: 'assistant',
+          content: step_response,
+          chatId: chat.id,
+        });
         break;
       }
 
       for (const toolCall of toolCalls) {
         const toolName = toolCall.function.name;
         const toolArgs = toolCall.function.arguments;
+
+        // Store the tool call
+        currentToolCalls.push({
+          name: toolName,
+          arguments: toolArgs,
+        });
 
         yield {
           type: 'tool_call',
@@ -222,6 +248,15 @@ export class ChatService {
           )
         ) {
           const error = `[ERROR] Unknown server for tool: ${toolName}`;
+
+          // Store the failed tool result
+          currentToolResults.push({
+            name: toolName,
+            arguments: toolArgs,
+            result: null,
+            error: error,
+          });
+
           yield {
             type: 'error',
             content: error,
@@ -232,6 +267,8 @@ export class ChatService {
         }
 
         let toolResponse = '';
+        let toolError: string | undefined;
+        let toolResult: any = null;
         try {
           const [, result] = await this.mcpServerConnector.callTool(
             userId,
@@ -241,8 +278,28 @@ export class ChatService {
           );
           // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           toolResponse = String(result?.content?.[0]?.text || '');
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          toolResult = result;
+
+          // Store the successful tool result
+          currentToolResults.push({
+            name: toolName,
+            arguments: toolArgs,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            result: toolResult,
+          });
         } catch (error) {
           toolResponse = `[ERROR] Failed to call tool '${toolName}': ${error instanceof Error ? error.message : String(error)}`;
+          toolError = error instanceof Error ? error.message : String(error);
+
+          // Store the failed tool result
+          currentToolResults.push({
+            name: toolName,
+            arguments: toolArgs,
+            result: null,
+            error: toolError,
+          });
+
           this.logger.error(toolResponse);
         }
 
@@ -251,8 +308,33 @@ export class ChatService {
             role: 'tool',
             content: toolResponse,
             chatId: chat.id,
+            toolResults: [
+              {
+                name: toolName,
+                arguments: toolArgs,
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+                result: toolResult,
+                error: toolError,
+              },
+            ],
           }),
         );
+
+        // Save the tool message to database
+        await this.createMessage({
+          role: 'tool',
+          content: toolResponse,
+          chatId: chat.id,
+          toolResults: [
+            {
+              name: toolName,
+              arguments: toolArgs,
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+              result: toolResult,
+              error: toolError,
+            },
+          ],
+        });
 
         yield {
           type: 'tool_result',
@@ -265,72 +347,34 @@ export class ChatService {
         };
       }
 
-      // Add the assistant message with tool calls to the conversation
-      messages.push(
-        this.messageRepository.create({
-          role: 'assistant',
-          content: step_response,
-          chatId: chat.id,
-        }),
-      );
+      // Save the assistant message with tool calls after processing all tools
+      const assistantMessage = this.messageRepository.create({
+        role: 'assistant',
+        content: step_response,
+        chatId: chat.id,
+        toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
+        toolResults:
+          currentToolResults.length > 0 ? currentToolResults : undefined,
+      });
+      messages.push(assistantMessage);
+
+      await this.createMessage({
+        role: 'assistant',
+        content: step_response,
+        chatId: chat.id,
+        toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
+        toolResults:
+          currentToolResults.length > 0 ? currentToolResults : undefined,
+      });
     }
 
-    // Save the final AI response message
-    await this.createMessage({
-      role: 'assistant',
-      content: response,
-      chatId: chatId,
-    });
+    // Final response is accumulated from all steps, no need to save again
+    // The individual assistant messages with tool data are already saved above
 
     // Indicate the conversation is complete
     yield {
       type: 'done',
       timestamp: new Date(),
-    };
-  }
-
-  private async buildChatContext(
-    chatId: string,
-    userId: string,
-    enabledTools: string[],
-  ): Promise<ChatContext> {
-    // Get chat history
-    const messages = await this.findMessagesByChat(chatId);
-
-    // Get available tools for the user
-    const userSessions = await this.mcpService.findSessionsByUser(userId);
-    const availableTools: ChatContext['availableTools'] = [];
-
-    for (const session of userSessions) {
-      // Check if the session still has an active connection
-      const connectedServers =
-        this.mcpServerConnector.getUserConnectedServers(userId);
-      const serverConnection = connectedServers.get(session.serverName);
-
-      if (serverConnection) {
-        for (const tool of serverConnection.tools) {
-          if (
-            tool.enabled &&
-            (enabledTools.length === 0 || enabledTools.includes(tool.name))
-          ) {
-            availableTools.push({
-              name: tool.name,
-              description: tool.description || '',
-              serverName: session.serverName,
-              enabled: true,
-            });
-          }
-        }
-      }
-    }
-
-    return {
-      messages: messages.map((msg) => ({
-        role: msg.role as 'user' | 'assistant' | 'tool',
-        content: msg.content,
-      })),
-      toolCallHistory: [],
-      availableTools,
     };
   }
 }

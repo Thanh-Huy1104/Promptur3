@@ -506,16 +506,36 @@ export class MCPServerConnector {
     },
   ): Promise<void> {
     try {
-      await this.mcpService.createTool({
-        userId,
-        name: tool.qualifiedName,
-        description: tool.description,
-        inputSchema: tool.inputSchema || {},
-        isEnabled: tool.enabled,
-      });
+      // First, try to find existing tool
+      const existingTool = await this.mcpService
+        .findToolsByUser(userId)
+        .then((tools) => tools.find((t) => t.name === tool.qualifiedName));
+
+      if (existingTool) {
+        // Update existing tool
+        await this.mcpService.updateTool(existingTool.id, {
+          description: tool.description,
+          inputSchema: tool.inputSchema || {},
+          isEnabled: tool.enabled,
+        });
+        console.log(`Updated existing tool: ${tool.qualifiedName}`);
+      } else {
+        // Create new tool
+        await this.mcpService.createTool({
+          userId,
+          name: tool.qualifiedName,
+          description: tool.description,
+          inputSchema: tool.inputSchema || {},
+          isEnabled: tool.enabled,
+        });
+        console.log(`Created new tool: ${tool.qualifiedName}`);
+      }
     } catch (error) {
-      // Tool might already exist, ignore duplicate errors
-      console.log(`Tool ${tool.qualifiedName} already exists or error:`, error);
+      console.error(
+        `Failed to create/update tool ${tool.qualifiedName}:`,
+        error,
+      );
+      throw error;
     }
   }
 

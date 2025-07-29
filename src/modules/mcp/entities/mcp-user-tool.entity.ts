@@ -4,10 +4,12 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  Unique,
 } from 'typeorm';
 import { User } from '../../user/user.entity';
 
 @Entity('mcp_user_tools')
+@Unique('UQ_user_tool_name', ['userId', 'name'])
 export class MCPUserTool {
   @PrimaryGeneratedColumn('uuid')
   id: string;

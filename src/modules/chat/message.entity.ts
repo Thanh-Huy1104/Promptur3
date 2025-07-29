@@ -19,6 +19,20 @@ export class Message {
   @Column({ type: 'text' })
   content: string;
 
+  @Column({ type: 'jsonb', nullable: true })
+  toolCalls: Array<{
+    name: string;
+    arguments: Record<string, any>;
+  }> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  toolResults: Array<{
+    name: string;
+    arguments: Record<string, any>;
+    result: any;
+    error?: string;
+  }> | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
