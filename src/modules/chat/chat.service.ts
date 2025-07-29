@@ -164,7 +164,7 @@ export class ChatService {
       };
       const supportsThinking = true;
       if (supportsThinking) {
-        chatParams.think = true;
+        chatParams.think = false;
       }
       if (toolDefs) {
         chatParams.tools = toolDefs;
