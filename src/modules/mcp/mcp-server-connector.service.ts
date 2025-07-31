@@ -1,10 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { MCPService } from './mcp.service';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
+import { MCPService } from './mcp.service';
 
 // Interfaces for server connection management
 export interface ServerConfig {
@@ -29,10 +29,9 @@ interface ConnectedServer {
     | StreamableHTTPClientTransport; // Transport instance
   tools: Array<{
     name: string;
-    qualifiedName: string;
-    description?: string;
-    enabled: boolean;
-    inputSchema?: any;
+    description: string;
+    isEnabled: boolean;
+    inputSchema: any;
   }>;
   sessionId?: string;
   connectedAt: Date;
@@ -55,7 +54,6 @@ export interface ConnectOptions {
 @Injectable()
 export class MCPServerConnector {
   private connectedServers: Map<string, ConnectedServer> = new Map();
-  private availableTools: Map<string, any> = new Map();
   private userClients: Map<string, Map<string, ConnectedServer>> = new Map(); // userId -> serverName -> ConnectedServer
 
   constructor(private readonly mcpService: MCPService) {}
@@ -98,7 +96,6 @@ export class MCPServerConnector {
       throw new Error('Command is required for STDIO transport');
     }
 
-    // Use the command directly (e.g., /Users/th/.local/bin/uv, npx)
     const command = serverConfig.path;
     const args: string[] = [];
 
@@ -452,10 +449,9 @@ export class MCPServerConnector {
   ): Promise<
     Array<{
       name: string;
-      qualifiedName: string;
-      description?: string;
-      enabled: boolean;
-      inputSchema?: any;
+      description: string;
+      isEnabled: boolean;
+      inputSchema: any;
     }>
   > {
     try {
@@ -463,23 +459,19 @@ export class MCPServerConnector {
       const toolsResponse = await client.listTools();
       const tools: Array<{
         name: string;
-        qualifiedName: string;
-        description?: string;
-        enabled: boolean;
-        inputSchema?: any;
+        description: string;
+        isEnabled: boolean;
+        inputSchema: any;
       }> = [];
 
       for (const tool of toolsResponse.tools) {
         tools.push({
-          name: tool.name,
-          qualifiedName: `${server.name}.${tool.name}`,
+          name: `${server.name}.${tool.name}`,
           description: tool.description || `Tool from ${server.name}`,
-          enabled: true,
+          isEnabled: true,
           inputSchema: tool.inputSchema,
         });
       }
-
-      console.log(`Discovered ${tools.length} tools from ${server.name}`);
       return tools;
     } catch (error) {
       console.error(`Failed to discover tools from ${server.name}:`, error);
@@ -487,9 +479,9 @@ export class MCPServerConnector {
       return [
         {
           name: 'example_tool',
-          qualifiedName: `${server.name}.example_tool`,
           description: `Example tool from ${server.name}`,
-          enabled: true,
+          isEnabled: true,
+          inputSchema: {},
         },
       ];
     }
@@ -499,42 +491,36 @@ export class MCPServerConnector {
     userId: string,
     tool: {
       name: string;
-      qualifiedName: string;
-      description?: string;
-      inputSchema?: Record<string, unknown>;
-      enabled: boolean;
+      description: string;
+      inputSchema: Record<string, unknown>;
+      isEnabled: boolean;
     },
   ): Promise<void> {
     try {
       // First, try to find existing tool
       const existingTool = await this.mcpService
         .findToolsByUser(userId)
-        .then((tools) => tools.find((t) => t.name === tool.qualifiedName));
+        .then((tools) => tools.find((t) => t.name === tool.name));
 
       if (existingTool) {
         // Update existing tool
         await this.mcpService.updateTool(existingTool.id, {
           description: tool.description,
           inputSchema: tool.inputSchema || {},
-          isEnabled: tool.enabled,
+          isEnabled: tool.isEnabled,
         });
-        console.log(`Updated existing tool: ${tool.qualifiedName}`);
       } else {
         // Create new tool
         await this.mcpService.createTool({
           userId,
-          name: tool.qualifiedName,
+          name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema || {},
-          isEnabled: tool.enabled,
+          isEnabled: tool.isEnabled,
         });
-        console.log(`Created new tool: ${tool.qualifiedName}`);
       }
     } catch (error) {
-      console.error(
-        `Failed to create/update tool ${tool.qualifiedName}:`,
-        error,
-      );
+      console.error(`Failed to create/update tool ${tool.name}:`, error);
       throw error;
     }
   }
@@ -636,10 +622,9 @@ export class MCPServerConnector {
     serverName: string,
   ): Array<{
     name: string;
-    qualifiedName: string;
-    description?: string;
-    enabled: boolean;
-    inputSchema?: any;
+    description: string;
+    isEnabled: boolean;
+    inputSchema: any;
   }> {
     const userServers = this.getUserConnectedServers(userId);
     const connectedServer = userServers.get(serverName);
@@ -653,10 +638,11 @@ export class MCPServerConnector {
     return connectedServer.tools;
   }
 
-  async enableServerTool(
+  async toggleServerTool(
     userId: string,
     serverName: string,
     toolName: string,
+    isEnabled: boolean,
   ): Promise<void> {
     const userServers = this.getUserConnectedServers(userId);
     const connectedServer = userServers.get(serverName);
@@ -674,48 +660,15 @@ export class MCPServerConnector {
       );
     }
 
-    tool.enabled = true;
+    tool.isEnabled = isEnabled;
 
     // Update in database
     const dbTools = await this.mcpService
       .findToolsByUser(userId)
-      .then((tools) => tools.filter((t) => t.name === tool.qualifiedName));
+      .then((tools) => tools.filter((t) => t.name === tool.name));
 
     for (const dbTool of dbTools) {
-      await this.mcpService.updateTool(dbTool.id, { isEnabled: true });
-    }
-  }
-
-  async disableServerTool(
-    userId: string,
-    serverName: string,
-    toolName: string,
-  ): Promise<void> {
-    const userServers = this.getUserConnectedServers(userId);
-    const connectedServer = userServers.get(serverName);
-
-    if (!connectedServer) {
-      throw new NotFoundException(
-        `Server ${serverName} is not connected for user ${userId}`,
-      );
-    }
-
-    const tool = connectedServer.tools.find((t) => t.name === toolName);
-    if (!tool) {
-      throw new NotFoundException(
-        `Tool ${toolName} not found on server ${serverName}`,
-      );
-    }
-
-    tool.enabled = false;
-
-    // Update in database
-    const dbTools = await this.mcpService
-      .findToolsByUser(userId)
-      .then((tools) => tools.filter((t) => t.name === tool.qualifiedName));
-
-    for (const dbTool of dbTools) {
-      await this.mcpService.updateTool(dbTool.id, { isEnabled: false });
+      await this.mcpService.updateTool(dbTool.id, { isEnabled });
     }
   }
 
@@ -783,29 +736,40 @@ export class MCPServerConnector {
     const userServers = this.getUserConnectedServers(userId);
     const connectedServer = userServers.get(serverName);
 
+    // to call a specific tool we need the tool name without the server prefix
+    // also need to check if server is connected for the tools each time
     if (!connectedServer) {
       throw new NotFoundException(
         `Server ${serverName} is not connected for user ${userId}`,
       );
     }
-
-    const tool = connectedServer.tools.find((t) => t.name === toolName);
-    if (!tool || !tool.enabled) {
+    // Look for tool by name - handle both full name and suffix
+    const tool = connectedServer.tools.find(
+      (t) =>
+        t.name === toolName ||
+        t.name === `${serverName}.${toolName}` ||
+        t.name.endsWith(`.${toolName}`),
+    );
+    if (!tool || !tool.isEnabled) {
       throw new NotFoundException(
         `Tool ${toolName} not found or not enabled on server ${serverName}`,
       );
     }
 
     try {
-      // Call the tool using the MCP client
+      // Call the tool using the MCP client - use the tool name without server prefix
+      const actualToolName = tool.name.includes('.')
+        ? tool.name.split('.').slice(1).join('.')
+        : tool.name;
+
       const result = await connectedServer.client.callTool({
-        name: toolName,
+        name: actualToolName,
         arguments: args as Record<string, any>,
       });
 
       return [null, result];
     } catch (error) {
-      console.error(`Error calling tool ${toolName}:`, error);
+      console.error(`Error calling tool ${tool.name}:`, error);
       return [error instanceof Error ? error.message : String(error), null];
     }
   }

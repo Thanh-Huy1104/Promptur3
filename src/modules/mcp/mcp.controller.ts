@@ -21,12 +21,10 @@ import {
   UpdateMCPUserSessionDto,
   CreateMCPUserToolDto,
   UpdateMCPUserToolDto,
+  ToggleServerToolDto,
 } from './dto/mcp.dto';
 import { MCPUserSession } from './entities/mcp-user-session.entity';
 import { MCPUserTool } from './entities/mcp-user-tool.entity';
-
-// Add DTOs for server connection - using imported interfaces
-// ConnectOptions interface is imported from mcp-server-connector.service
 
 @Controller('mcp')
 export class MCPController {
@@ -187,29 +185,18 @@ export class MCPController {
     return this.mcpServerConnector.getServerTools(userId, serverName);
   }
 
-  @Post('servers/:userId/:serverName/tools/:toolName/enable')
-  async enableServerTool(
+  @Patch('servers/:userId/:serverName/tools/:toolName/toggle')
+  async toggleServerTool(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Param('serverName') serverName: string,
     @Param('toolName') toolName: string,
+    @Body() body: { isEnabled: boolean },
   ): Promise<void> {
-    return this.mcpServerConnector.enableServerTool(
+    return this.mcpServerConnector.toggleServerTool(
       userId,
       serverName,
       toolName,
-    );
-  }
-
-  @Post('servers/:userId/:serverName/tools/:toolName/disable')
-  async disableServerTool(
-    @Param('userId', ParseUUIDPipe) userId: string,
-    @Param('serverName') serverName: string,
-    @Param('toolName') toolName: string,
-  ): Promise<void> {
-    return this.mcpServerConnector.disableServerTool(
-      userId,
-      serverName,
-      toolName,
+      body.isEnabled,
     );
   }
 
@@ -240,15 +227,6 @@ export class MCPController {
   ): Promise<{ count: number }> {
     return this.mcpService
       .getActiveSessionsCount(userId)
-      .then((count) => ({ count }));
-  }
-
-  @Get('stats/user/:userId/tools')
-  getEnabledToolsCount(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<{ count: number }> {
-    return this.mcpService
-      .getEnabledToolsCount(userId)
       .then((count) => ({ count }));
   }
 }

@@ -137,7 +137,6 @@ export class ChatService {
     const modelOptions = {};
     const enabledTools: MCPUserTool[] =
       await this.mcpService.findToolsByUser(userId);
-    console.log('Enabled tools:', enabledTools);
     const toolDefs: Tool[] = enabledTools.map((tool: MCPUserTool) => ({
       type: 'function',
       function: {
@@ -167,7 +166,6 @@ export class ChatService {
       if (toolDefs) {
         chatParams.tools = toolDefs;
       }
-
       const stream = await this.llmService.chat(chatParams);
       const toolCalls: ToolCall[] = [];
       let step_response = '';
@@ -302,7 +300,6 @@ export class ChatService {
 
           this.logger.error(toolResponse);
         }
-
         messages.push(
           this.messageRepository.create({
             role: 'tool',
@@ -323,7 +320,7 @@ export class ChatService {
         // Save the tool message to database
         await this.createMessage({
           role: 'tool',
-          content: toolResponse,
+          content: step_response,
           chatId: chat.id,
           toolResults: [
             {
@@ -357,15 +354,6 @@ export class ChatService {
           currentToolResults.length > 0 ? currentToolResults : undefined,
       });
       messages.push(assistantMessage);
-
-      await this.createMessage({
-        role: 'assistant',
-        content: step_response,
-        chatId: chat.id,
-        toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
-        toolResults:
-          currentToolResults.length > 0 ? currentToolResults : undefined,
-      });
     }
 
     // Final response is accumulated from all steps, no need to save again
